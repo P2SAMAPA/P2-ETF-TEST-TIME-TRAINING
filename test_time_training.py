@@ -19,7 +19,7 @@ class TTTNetwork(nn.Module):
         self.ttt_fc1 = nn.Linear(hidden_size, hidden_size // 2)
         self.ttt_fc2 = nn.Linear(hidden_size // 2, 1)
         # Auxiliary decoder for self-supervised loss (reconstruction)
-        self.decoder = nn.Linear(hidden_size // 2, hidden_size)
+        self.decoder = nn.Linear(hidden_size // 2, input_size)  # reconstruct full input
         self.relu = nn.ReLU()
 
     def forward(self, x):
@@ -38,8 +38,8 @@ class TTTNetwork(nn.Module):
         h = lstm_out[:, -1, :]
         h = self.relu(self.ttt_fc1(h))
         out = self.ttt_fc2(h)
-        # Auxiliary reconstruction
-        reconstructed = self.decoder(h)
+        # Auxiliary reconstruction: reconstruct the entire input sequence
+        reconstructed = self.decoder(h)  # (batch, input_size)
         return out.squeeze(-1), reconstructed
 
     def adapt(self, x, lr=0.0001, steps=5):
@@ -53,16 +53,10 @@ class TTTNetwork(nn.Module):
         for _ in range(steps):
             # Forward pass
             _, reconstructed = self.forward_with_aux(x)
-            # Self-supervised loss: reconstruction error
-            # Target: the input itself (we reconstruct from the hidden state)
-            # We need the original input features (the sequence)
-            target = x[:, -1, :]  # Use the last time step as target
-            # But the decoder outputs hidden_size, not input_size. We'll use a projection.
-            # Simpler: use a contrastive loss: encourage consistent predictions over time.
-            # For simplicity, we'll use the reconstruction loss from the decoder.
-            # Actually we need to reconstruct the sequence.
-            # Since this is simplified, we'll use a loss that encourages consistency.
-            loss = F.mse_loss(reconstructed, x[:, -1, :self.hidden_size])
+            # Self-supervised loss: reconstruct the last time step of the input
+            target = x[:, -1, :]  # (batch, input_size)
+            # Now both have size (batch, input_size)
+            loss = F.mse_loss(reconstructed, target)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
